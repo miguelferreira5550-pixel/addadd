@@ -1,0 +1,393 @@
+--[[
+  Script Final: Box, Tracer, FOV single-target AIM, GUI com abas
+  Distâncias reguláveis para Box e Tracer
+--]]
+
+-- SERVICES
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local workspace = game:GetService("Workspace")
+
+local plr = Players.LocalPlayer
+local cam = workspace.CurrentCamera
+
+-- ======= CONFIG =======
+local AIM_ON = false
+local FOV_VISIBLE = true
+local BOX_ON = true
+local TRACER_ON = true
+local SMOOTH_ON = true
+
+local FOV_RADIUS = 120
+local FOV_COLOR = Color3.fromRGB(255,0,0)
+local FOV_THICKNESS = 2
+local MaxAimDistance = 100
+local lerpAmount = 0.18
+
+local MAX_DIST_BOX = 300
+local MAX_DIST_TRACER = 300
+
+local ESPColors = {
+    Color3.fromRGB(255,182,193),
+    Color3.fromRGB(0,0,0),
+    Color3.fromRGB(0,0,255),
+    Color3.fromRGB(255,0,0),
+    Color3.fromRGB(128,128,128),
+}
+local espColorIndex = 4
+local ESPColor = ESPColors[espColorIndex]
+
+-- ======= DRAWINGS =======
+local function safeNewDrawing(kind)
+    local ok, obj = pcall(function() return Drawing and Drawing.new(kind) end)
+    if ok then return obj end
+    return nil
+end
+
+local drawingsByPlayer = {}
+
+local function createDrawingsForPlayer(player)
+    if not player or player == plr then return end
+    if drawingsByPlayer[player] then return end
+    local box = safeNewDrawing("Square")
+    local tracer = safeNewDrawing("Line")
+    if box then
+        box.Visible = false
+        box.Filled = false
+        box.Thickness = 1
+        box.Color = ESPColor
+    end
+    if tracer then
+        tracer.Visible = false
+        tracer.Thickness = 1
+        tracer.Color = ESPColor
+    end
+    drawingsByPlayer[player] = {box = box, tracer = tracer}
+end
+
+local function removeDrawingsForPlayer(player)
+    local d = drawingsByPlayer[player]
+    if not d then return end
+    if d.box then pcall(function() d.box:Remove() end) end
+    if d.tracer then pcall(function() d.tracer:Remove() end) end
+    drawingsByPlayer[player] = nil
+end
+
+for _, p in pairs(Players:GetPlayers()) do createDrawingsForPlayer(p) end
+Players.PlayerAdded:Connect(function(p) createDrawingsForPlayer(p) end)
+Players.PlayerRemoving:Connect(function(p) removeDrawingsForPlayer(p) end)
+
+-- ======= GUI =======
+local ScreenGui = Instance.new("ScreenGui", plr:WaitForChild("PlayerGui"))
+ScreenGui.ResetOnSpawn = false
+
+local Toggle = Instance.new("TextButton", ScreenGui)
+Toggle.Size = UDim2.new(0,120,0,36)
+Toggle.Position = UDim2.new(0,12,0,12)
+Toggle.BackgroundColor3 = Color3.fromRGB(45,45,45)
+Toggle.TextColor3 = Color3.new(1,1,1)
+Toggle.Text = "Fechar GUI"
+
+local Panel = Instance.new("Frame", ScreenGui)
+Panel.Size = UDim2.new(0,320,0,300)
+Panel.Position = UDim2.new(0,12,0,58)
+Panel.BackgroundColor3 = Color3.fromRGB(36,36,36)
+
+local TabsFrame = Instance.new("Frame", Panel)
+TabsFrame.Size = UDim2.new(1,0,0,36)
+TabsFrame.Position = UDim2.new(0,0,0,0)
+TabsFrame.BackgroundTransparency = 1
+
+local contentFrame = Instance.new("Frame", Panel)
+contentFrame.Size = UDim2.new(1,-8,1,-44)
+contentFrame.Position = UDim2.new(0,4,0,40)
+contentFrame.BackgroundColor3 = Color3.fromRGB(28,28,28)
+
+local function makeTabButton(text,x)
+    local b = Instance.new("TextButton", TabsFrame)
+    b.Size = UDim2.new(0,100,1,-4)
+    b.Position = UDim2.new(0,4 + (x-1)*104,0,2)
+    b.Text = text
+    b.BackgroundColor3 = Color3.fromRGB(54,54,54)
+    b.TextColor3 = Color3.new(1,1,1)
+    return b
+end
+
+local tabAimBtn = makeTabButton("AIM",1)
+local tabESPBtn = makeTabButton("ESP",2)
+local tabConfigBtn = makeTabButton("CONFIG",3)
+
+local aimFrame = Instance.new("Frame", contentFrame)
+aimFrame.Size = UDim2.new(1,0,1,0)
+
+local espFrame = Instance.new("Frame", contentFrame)
+espFrame.Size = UDim2.new(1,0,1,0)
+espFrame.Visible = false
+
+local configFrame = Instance.new("Frame", contentFrame)
+configFrame.Size = UDim2.new(1,0,1,0)
+configFrame.Visible = false
+
+local function switchTo(frame)
+    aimFrame.Visible = (frame==aimFrame)
+    espFrame.Visible = (frame==espFrame)
+    configFrame.Visible = (frame==configFrame)
+end
+
+tabAimBtn.MouseButton1Click:Connect(function() switchTo(aimFrame) end)
+tabESPBtn.MouseButton1Click:Connect(function() switchTo(espFrame) end)
+tabConfigBtn.MouseButton1Click:Connect(function() switchTo(configFrame) end)
+
+local GUI_OPEN = true
+Toggle.MouseButton1Click:Connect(function()
+    GUI_OPEN = not GUI_OPEN
+    Panel.Visible = GUI_OPEN
+    Toggle.Text = GUI_OPEN and "Fechar GUI" or "Abrir GUI"
+end)
+
+local function makeButton(parent,text,y)
+    local b = Instance.new("TextButton",parent)
+    b.Size = UDim2.new(0,140,0,34)
+    b.Position = UDim2.new(0,8 + (y%2)*150,0,8 + math.floor(y/2)*42)
+    b.BackgroundColor3 = Color3.fromRGB(40,40,40)
+    b.TextColor3 = Color3.new(1,1,1)
+    b.Text = text
+    return b
+end
+
+local function makeLabel(parent,text,y)
+    local l = Instance.new("TextLabel",parent)
+    l.Size = UDim2.new(0,300,0,26)
+    l.Position = UDim2.new(0,8,0,8 + y*28)
+    l.BackgroundTransparency = 1
+    l.TextColor3 = Color3.new(1,1,1)
+    l.Text = text
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    return l
+end
+
+-- ====== ABA AIM ======
+local btnAimToggle = makeButton(aimFrame,"AIM OFF",0)
+local btnFovToggle = makeButton(aimFrame,"FOV ON",1)
+local btnFovUp = makeButton(aimFrame,"FOV +",2)
+local btnFovDown = makeButton(aimFrame,"FOV -",3)
+local btnFovColor = makeButton(aimFrame,"Mudar Cor FOV",4)
+local labelAimInfo = makeLabel(aimFrame,"Alvo atual: Nenhum",7)
+
+btnAimToggle.MouseButton1Click:Connect(function()
+    AIM_ON = not AIM_ON
+    btnAimToggle.Text = AIM_ON and "AIM ON" or "AIM OFF"
+end)
+btnFovToggle.MouseButton1Click:Connect(function()
+    FOV_VISIBLE = not FOV_VISIBLE
+    btnFovToggle.Text = FOV_VISIBLE and "FOV ON" or "FOV OFF"
+end)
+btnFovUp.MouseButton1Click:Connect(function() FOV_RADIUS = math.clamp(FOV_RADIUS+20,20,1000) end)
+btnFovDown.MouseButton1Click:Connect(function() FOV_RADIUS = math.clamp(FOV_RADIUS-20,20,1000) end)
+btnFovColor.MouseButton1Click:Connect(function()
+    espColorIndex = espColorIndex + 1
+    if espColorIndex>#ESPColors then espColorIndex=1 end
+    FOV_COLOR = ESPColors[espColorIndex]
+    ESPColor = FOV_COLOR
+end)
+
+-- ====== ABA ESP ======
+local btnBoxToggle = makeButton(espFrame,"BOX ON",0)
+local btnTracerToggle = makeButton(espFrame,"TRACER ON",1)
+local btnESPColor = makeButton(espFrame,"Mudar Cor ESP",2)
+
+
+btnBoxToggle.MouseButton1Click:Connect(function()
+    BOX_ON = not BOX_ON
+    btnBoxToggle.Text = BOX_ON and "BOX ON" or "BOX OFF"
+end)
+btnTracerToggle.MouseButton1Click:Connect(function()
+    TRACER_ON = not TRACER_ON
+    btnTracerToggle.Text = TRACER_ON and "TRACER ON" or "TRACER OFF"
+end)
+btnESPColor.MouseButton1Click:Connect(function()
+    espColorIndex = espColorIndex + 1
+    if espColorIndex>#ESPColors then espColorIndex=1 end
+    ESPColor = ESPColors[espColorIndex]
+    FOV_COLOR = ESPColor
+end)
+
+
+
+-- ====== ABA CONFIG ======
+local btnSmoothToggle = makeButton(configFrame,"XIT FULL OFF",0)
+local labelSmooth = makeLabel(configFrame,"lerpAmount: "..string.format("%.2f",lerpAmount),2)
+btnSmoothToggle.MouseButton1Click:Connect(function()
+    SMOOTH_ON = not SMOOTH_ON
+    btnSmoothToggle.Text = SMOOTH_ON and "XIT FULL OFF" or "XIT FULL ON"
+end)
+UserInputService.InputBegan:Connect(function(input,gpe)
+    if gpe then return end
+    if input.KeyCode==Enum.KeyCode.Equals then
+        lerpAmount = math.clamp(lerpAmount+0.02,0.01,0.9)
+        labelSmooth.Text = "lerpAmount: "..string.format("%.2f",lerpAmount)
+    elseif input.KeyCode==Enum.KeyCode.Minus then
+        lerpAmount = math.clamp(lerpAmount-0.02,0.01,0.9)
+        labelSmooth.Text = "lerpAmount: "..string.format("%.2f",lerpAmount)
+    end
+end)
+
+-- ====== FOV circle ======
+local circle = safeNewDrawing("Circle")
+if circle then
+    circle.Thickness = FOV_THICKNESS
+    circle.NumSides = 72
+    circle.Filled = false
+    circle.Visible = true
+end
+
+local currentTarget = nil
+local function canSeeCharacter(character)
+    local head = character:FindFirstChild("Head")
+    if not head then return false end
+    local params = RaycastParams.new()
+    params.FilterDescendantsInstances = {plr.Character}
+    params.FilterType = Enum.RaycastFilterType.Blacklist
+    local result = workspace:Raycast(cam.CFrame.Position, head.Position - cam.CFrame.Position, params)
+    if not result then return true end
+    if result.Instance and result.Instance:IsDescendantOf(character) then return true end
+    return false
+end
+
+local function pickTargetInFOV()
+    local best = nil
+    local bestDist = math.huge
+    local center = Vector2.new(cam.ViewportSize.X/2, cam.ViewportSize.Y/2)
+    for _, p in pairs(Players:GetPlayers()) do
+        if p~=plr and p.Character and p.Character:FindFirstChild("Head") then
+            local head = p.Character.Head
+            local pos, onScreen = cam:WorldToViewportPoint(head.Position)
+            local dist3D = (head.Position-cam.CFrame.Position).Magnitude
+            if onScreen and dist3D<=MaxAimDistance and canSeeCharacter(p.Character) then
+                local dist2D = (Vector2.new(pos.X,pos.Y)-center).Magnitude
+                if dist2D<=FOV_RADIUS and dist2D<bestDist then
+                    best = p
+                    bestDist = dist2D
+                end
+            end
+        end
+    end
+    return best
+end
+
+-- ====== Loop principal ======
+RunService.RenderStepped:Connect(function()
+    local viewport = cam.ViewportSize
+    local center = Vector2.new(viewport.X/2,viewport.Y/2)
+
+    -- FOV Circle
+    if circle then
+        circle.Position = center
+        circle.Radius = FOV_RADIUS
+        circle.Color = FOV_COLOR or ESPColor
+        circle.Visible = FOV_VISIBLE
+    end
+
+    local closestDist = math.huge
+    local closestPlayer = nil
+
+    for player,d in pairs(drawingsByPlayer) do
+        if player~=plr and player.Character and player.Character:FindFirstChild("Head") and player.Character:FindFirstChild("HumanoidRootPart") then
+            local head = player.Character.Head
+            local hrp = player.Character.HumanoidRootPart
+            local headPos, onScreen = cam:WorldToViewportPoint(head.Position)
+            local hrpPos, hrpOn = cam:WorldToViewportPoint(hrp.Position)
+
+            if onScreen and hrpOn then
+                local screenHead = Vector2.new(headPos.X, headPos.Y)
+                local screenHrp = Vector2.new(hrpPos.X, hrpPos.Y)
+
+                local dist = (head.Position - cam.CFrame.Position).Magnitude
+
+                -- Box
+                if d.box then
+                    if dist <= MAX_DIST_BOX then
+                        local height = math.max(12, math.abs(screenHead.Y - screenHrp.Y))
+                        local width = math.clamp(height*0.5,8,200)
+                        local topLeft = Vector2.new(screenHead.X-width/2, screenHead.Y-(height*0.15))
+                        d.box.Position = topLeft
+                        d.box.Size = Vector2.new(width,height)
+                        d.box.Color = ESPColor
+                        d.box.Visible = BOX_ON
+                    else
+                        d.box.Visible = false
+                    end
+                end
+
+                -- Tracer
+                if d.tracer then
+                    if dist <= MAX_DIST_TRACER then
+                        d.tracer.From = Vector2.new(center.X,0)
+                        d.tracer.To = screenHead
+                        d.tracer.Color = ESPColor
+                        d.tracer.Visible = TRACER_ON
+                    else
+                        d.tracer.Visible = false
+                    end
+                end
+
+                -- para AIM / tracer selecionar mais próximo
+                if dist<closestDist then
+                    closestDist = dist
+                    closestPlayer = player
+                end
+            else
+                if d.box then d.box.Visible=false end
+                if d.tracer then d.tracer.Visible=false end
+            end
+        else
+            if d.box then d.box.Visible=false end
+            if d.tracer then d.tracer.Visible=false end
+        end
+    end
+
+    -- AIM
+    if AIM_ON then currentTarget=pickTargetInFOV() else currentTarget=nil end
+    if currentTarget and currentTarget.Character and currentTarget.Character:FindFirstChild("Head") then
+        labelAimInfo.Text = "Alvo atual: "..currentTarget.Name
+        local headPos = currentTarget.Character.Head.Position
+        local camPos = cam.CFrame.Position
+        local desiredDir = (headPos-camPos).Unit
+        if SMOOTH_ON then
+            local newDir = cam.CFrame.LookVector:Lerp(desiredDir, lerpAmount)
+            cam.CFrame = CFrame.new(camPos, camPos+newDir)
+        else
+            cam.CFrame = CFrame.new(camPos, camPos+desiredDir)
+        end
+    else
+        labelAimInfo.Text = "Alvo atual: Nenhum"
+    end
+end)
+
+print("[ESP/AIM] Script completo carregado ✅")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
